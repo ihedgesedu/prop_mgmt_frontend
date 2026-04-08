@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import apiClient from '@/api/client';
-import { Plus, Search, Building2, MapPin, User, DollarSign, Loader2, MoreVertical, Trash2, Edit3, X } from 'lucide-vue-next';
+import { Plus, Search, Building2, MapPin, User, DollarSign, Loader2, Trash2, Edit3, X } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import { formatCurrency } from '@/utils/formatters';
 
@@ -11,8 +11,12 @@ const loading = ref(true);
 const error = ref<string | null>(null);
 const searchQuery = ref('');
 const isModalOpen = ref(false);
+const isEditFlyoutOpen = ref(false);
+const isConfirmModalOpen = ref(false);
+const editingPropertyId = ref<number | null>(null);
+const pendingChanges = ref<string[]>([]);
 
-const newProperty = ref({
+const defaultPropertyForm = () => ({
   name: '',
   address: '',
   city: '',
@@ -22,6 +26,11 @@ const newProperty = ref({
   tenant_name: '',
   monthly_rent: 0
 });
+
+const editPropertyForm = ref(defaultPropertyForm());
+const originalEditProperty = ref(defaultPropertyForm());
+
+const newProperty = ref(defaultPropertyForm());
 
 const fetchProperties = async () => {
   try {
@@ -64,14 +73,7 @@ const addProperty = async () => {
     properties.value.push(created);
     isModalOpen.value = false;
     newProperty.value = {
-      name: '',
-      address: '',
-      city: '',
-      state: '',
-      postal_code: '',
-      property_type: 'Apartment',
-      tenant_name: '',
-      monthly_rent: 0
+      ...defaultPropertyForm()
     };
   } catch (err) {
     console.error('Error adding property:', err);
@@ -98,6 +100,102 @@ const filteredProperties = () => {
     p.address.toLowerCase().includes(query) ||
     p.tenant_name.toLowerCase().includes(query)
   );
+};
+
+const openEditFlyout = (property: any) => {
+  const normalized = {
+    name: property.name ?? '',
+    address: property.address ?? '',
+    city: property.city ?? '',
+    state: property.state ?? '',
+    postal_code: property.postal_code ?? '',
+    property_type: property.property_type ?? 'Apartment',
+    tenant_name: property.tenant_name ?? '',
+    monthly_rent: Number(property.monthly_rent ?? 0)
+  };
+
+  editingPropertyId.value = Number(property.id);
+  originalEditProperty.value = { ...normalized };
+  editPropertyForm.value = { ...normalized };
+  pendingChanges.value = [];
+  isConfirmModalOpen.value = false;
+  isEditFlyoutOpen.value = true;
+};
+
+const closeEditFlyout = () => {
+  isEditFlyoutOpen.value = false;
+  isConfirmModalOpen.value = false;
+  editingPropertyId.value = null;
+  pendingChanges.value = [];
+};
+
+const toDisplay = (value: string | number) => {
+  if (typeof value === 'number') return `${formatCurrency(value)}`;
+  return value || '(empty)';
+};
+
+const editableFieldLabels: Record<string, string> = {
+  name: 'Name',
+  address: 'Address',
+  city: 'City',
+  state: 'State',
+  postal_code: 'Postal Code',
+  property_type: 'Property Type',
+  tenant_name: 'Tenant Name',
+  monthly_rent: 'Monthly Rent'
+};
+
+const buildChanges = () => {
+  const payload: Record<string, any> = {};
+  const changes: string[] = [];
+  const keys = Object.keys(editableFieldLabels) as Array<keyof typeof editPropertyForm.value>;
+
+  keys.forEach((key) => {
+    const originalValue = originalEditProperty.value[key];
+    const nextValue = editPropertyForm.value[key];
+
+    if (originalValue !== nextValue) {
+      payload[key] = nextValue;
+      changes.push(`${editableFieldLabels[key]}: ${toDisplay(originalValue)} -> ${toDisplay(nextValue)}`);
+    }
+  });
+
+  return { payload, changes };
+};
+
+const openChangesConfirmation = () => {
+  const { changes } = buildChanges();
+  if (changes.length === 0) {
+    alert('No changes detected.');
+    return;
+  }
+  pendingChanges.value = changes;
+  isConfirmModalOpen.value = true;
+};
+
+const confirmEditProperty = async () => {
+  if (editingPropertyId.value === null) return;
+
+  const { payload } = buildChanges();
+  if (Object.keys(payload).length === 0) {
+    isConfirmModalOpen.value = false;
+    return;
+  }
+
+  try {
+    await apiClient.patch(`/properties/${editingPropertyId.value}`, payload);
+    const idx = properties.value.findIndex((p) => Number(p.id) === editingPropertyId.value);
+    if (idx !== -1) {
+      properties.value[idx] = {
+        ...properties.value[idx],
+        ...payload
+      };
+    }
+    closeEditFlyout();
+  } catch (err) {
+    console.error('Error updating property:', err);
+    alert('Failed to update property.');
+  }
 };
 
 onMounted(fetchProperties);
@@ -175,6 +273,12 @@ const navigateToDetail = (id: any) => {
             referrerPolicy="no-referrer"
           />
           <div class="absolute top-4 right-4 flex space-x-2">
+            <button 
+              @click.stop="openEditFlyout(property)"
+              class="p-2 bg-white/90 backdrop-blur rounded-lg text-gray-500 hover:bg-gray-700 hover:text-white transition-all shadow-sm"
+            >
+              <Edit3 class="w-4 h-4" />
+            </button>
             <button 
               @click.stop="deleteProperty(property.id)"
               class="p-2 bg-white/90 backdrop-blur rounded-lg text-rose-600 hover:bg-rose-600 hover:text-white transition-all shadow-sm"
@@ -289,6 +393,87 @@ const navigateToDetail = (id: any) => {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- Edit Property Flyout -->
+    <div v-if="isEditFlyoutOpen" class="fixed inset-0 z-[120]">
+      <div class="absolute inset-0 bg-black/40" @click="closeEditFlyout"></div>
+      <aside class="absolute top-0 right-0 h-full w-full max-w-xl bg-white shadow-2xl flex flex-col">
+        <div class="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
+          <h3 class="text-xl font-bold text-gray-900">Edit Property</h3>
+          <button @click="closeEditFlyout" class="p-2 hover:bg-gray-100 rounded-full transition-colors">
+            <X class="w-5 h-5 text-gray-400" />
+          </button>
+        </div>
+
+        <form @submit.prevent="openChangesConfirmation" class="p-6 space-y-5 overflow-y-auto flex-1">
+          <div class="space-y-2">
+            <label class="text-sm font-semibold text-gray-700">Property Name</label>
+            <input v-model="editPropertyForm.name" required type="text" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-semibold text-gray-700">Property Type</label>
+            <select v-model="editPropertyForm.property_type" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+              <option>Apartment</option>
+              <option>House</option>
+              <option>Commercial</option>
+              <option>Industrial</option>
+            </select>
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-semibold text-gray-700">Address</label>
+            <input v-model="editPropertyForm.address" required type="text" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <label class="text-sm font-semibold text-gray-700">City</label>
+              <input v-model="editPropertyForm.city" required type="text" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-semibold text-gray-700">State</label>
+              <input v-model="editPropertyForm.state" required type="text" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-semibold text-gray-700">Postal Code</label>
+            <input v-model="editPropertyForm.postal_code" required type="text" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-semibold text-gray-700">Tenant Name</label>
+            <input v-model="editPropertyForm.tenant_name" required type="text" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-semibold text-gray-700">Monthly Rent ($)</label>
+            <input v-model.number="editPropertyForm.monthly_rent" required type="number" step="0.01" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+          </div>
+
+          <div class="sticky bottom-0 bg-white pt-4">
+            <button type="submit" class="w-full py-2.5 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm">
+              Confirm Edits
+            </button>
+          </div>
+        </form>
+      </aside>
+    </div>
+
+    <!-- Edit Confirmation Modal -->
+    <div v-if="isConfirmModalOpen" class="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/60">
+      <div class="bg-white rounded-xl w-full max-w-xl p-6 space-y-4 shadow-2xl">
+        <h4 class="text-lg font-bold text-gray-900">Please confirm you want to make the following changes</h4>
+        <ul class="space-y-2 max-h-64 overflow-y-auto">
+          <li v-for="change in pendingChanges" :key="change" class="text-sm text-gray-700 bg-gray-50 rounded-md px-3 py-2">
+            {{ change }}
+          </li>
+        </ul>
+        <div class="flex justify-end space-x-3 pt-2">
+          <button @click="isConfirmModalOpen = false" class="px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">
+            Cancel
+          </button>
+          <button @click="confirmEditProperty" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+            Yes, apply changes
+          </button>
+        </div>
       </div>
     </div>
   </div>
