@@ -13,8 +13,12 @@ const searchQuery = ref('');
 const isModalOpen = ref(false);
 const isEditFlyoutOpen = ref(false);
 const isConfirmModalOpen = ref(false);
+const isDeleteModalOpen = ref(false);
 const editingPropertyId = ref<number | null>(null);
 const pendingChanges = ref<string[]>([]);
+const propertyToDelete = ref<any>(null);
+const progressBannerMessage = ref<string | null>(null);
+let progressBannerTimer: ReturnType<typeof setTimeout> | null = null;
 
 const defaultPropertyForm = () => ({
   name: '',
@@ -63,14 +67,19 @@ const fetchProperties = async () => {
   }
 };
 
+const showProgressBanner = (message: string) => {
+  progressBannerMessage.value = message;
+  if (progressBannerTimer) clearTimeout(progressBannerTimer);
+  progressBannerTimer = setTimeout(() => {
+    progressBannerMessage.value = null;
+  }, 2200);
+};
+
 const addProperty = async () => {
   try {
-    const response = await apiClient.post('/properties', newProperty.value);
-    const created = {
-      ...response.data,
-      id: response.data.id ?? response.data.property_id
-    };
-    properties.value.push(created);
+    showProgressBanner('Adding property in progress');
+    await apiClient.post('/properties', newProperty.value);
+    await fetchProperties();
     isModalOpen.value = false;
     newProperty.value = {
       ...defaultPropertyForm()
@@ -81,11 +90,19 @@ const addProperty = async () => {
   }
 };
 
-const deleteProperty = async (id: number) => {
-  if (!confirm('Are you sure you want to delete this property?')) return;
+const openDeleteModal = (property: any) => {
+  propertyToDelete.value = property;
+  isDeleteModalOpen.value = true;
+};
+
+const deleteProperty = async () => {
+  if (!propertyToDelete.value) return;
   try {
-    await apiClient.delete(`/properties/${id}`);
-    properties.value = properties.value.filter(p => p.id !== id);
+    showProgressBanner('Deletion in progress');
+    await apiClient.delete(`/properties/${propertyToDelete.value.id}`);
+    properties.value = properties.value.filter(p => p.id !== propertyToDelete.value.id);
+    isDeleteModalOpen.value = false;
+    propertyToDelete.value = null;
   } catch (err) {
     console.error('Error deleting property:', err);
     alert('Failed to delete property.');
@@ -183,14 +200,9 @@ const confirmEditProperty = async () => {
   }
 
   try {
+    showProgressBanner('Updating property in progress');
     await apiClient.patch(`/properties/${editingPropertyId.value}`, payload);
-    const idx = properties.value.findIndex((p) => Number(p.id) === editingPropertyId.value);
-    if (idx !== -1) {
-      properties.value[idx] = {
-        ...properties.value[idx],
-        ...payload
-      };
-    }
+    await fetchProperties();
     closeEditFlyout();
   } catch (err) {
     console.error('Error updating property:', err);
@@ -212,6 +224,13 @@ const navigateToDetail = (id: any) => {
 
 <template>
   <div class="space-y-8">
+    <div
+      v-if="progressBannerMessage"
+      class="fixed top-4 left-1/2 -translate-x-1/2 z-[160] bg-indigo-600 text-white px-6 py-3 rounded-xl shadow-xl text-base font-bold"
+    >
+      {{ progressBannerMessage }}
+    </div>
+
     <!-- Header -->
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
       <div class="flex flex-col space-y-2">
@@ -280,7 +299,7 @@ const navigateToDetail = (id: any) => {
               <Edit3 class="w-4 h-4" />
             </button>
             <button 
-              @click.stop="deleteProperty(property.id)"
+              @click.stop="openDeleteModal(property)"
               class="p-2 bg-white/90 backdrop-blur rounded-lg text-rose-600 hover:bg-rose-600 hover:text-white transition-all shadow-sm"
             >
               <Trash2 class="w-4 h-4" />
@@ -472,6 +491,38 @@ const navigateToDetail = (id: any) => {
           </button>
           <button @click="confirmEditProperty" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
             Yes, apply changes
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div v-if="isDeleteModalOpen && propertyToDelete" class="fixed inset-0 z-[135] flex items-center justify-center p-4 bg-black/60">
+      <div class="bg-white rounded-xl w-full max-w-2xl p-6 space-y-4 shadow-2xl">
+        <h4 class="text-lg font-bold text-gray-900">
+          Are your sure you want to delete the following property:
+        </h4>
+        <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+          <p class="text-base font-bold text-gray-900">{{ propertyToDelete.name }}:</p>
+          <p class="text-sm text-gray-700 mt-2">
+            {{ propertyToDelete.address }}, {{ propertyToDelete.city }}, {{ propertyToDelete.state }} {{ propertyToDelete.postal_code }}
+          </p>
+          <p class="text-sm text-gray-700 mt-1">
+            Type: {{ propertyToDelete.property_type }} | Tenant: {{ propertyToDelete.tenant_name }} | Rent: ${{ formatCurrency(propertyToDelete.monthly_rent) }}/mo
+          </p>
+        </div>
+        <div class="flex justify-end space-x-3 pt-2">
+          <button
+            @click="isDeleteModalOpen = false; propertyToDelete = null"
+            class="px-4 py-2 border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            @click="deleteProperty"
+            class="px-4 py-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700"
+          >
+            Delete
           </button>
         </div>
       </div>

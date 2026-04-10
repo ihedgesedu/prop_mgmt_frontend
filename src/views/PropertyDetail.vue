@@ -29,6 +29,8 @@ const isExpenseModalOpen = ref(false);
 const isEditFlyoutOpen = ref(false);
 const isConfirmModalOpen = ref(false);
 const pendingChanges = ref<string[]>([]);
+const progressBannerMessage = ref<string | null>(null);
+let progressBannerTimer: ReturnType<typeof setTimeout> | null = null;
 
 const defaultPropertyForm = () => ({
   name: '',
@@ -152,6 +154,14 @@ const fetchData = async () => {
   }
 };
 
+const showProgressBanner = (message: string) => {
+  progressBannerMessage.value = message;
+  if (progressBannerTimer) clearTimeout(progressBannerTimer);
+  progressBannerTimer = setTimeout(() => {
+    progressBannerMessage.value = null;
+  }, 2200);
+};
+
 // Re-fetch if ID changes
 watch(propertyId, (newId) => {
   if (newId) fetchData();
@@ -159,9 +169,9 @@ watch(propertyId, (newId) => {
 
 const addIncome = async () => {
   try {
-    const response = await apiClient.post('/income', newIncome.value);
-    incomeRecords.value.unshift(response.data);
-    incomeRecords.value.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    showProgressBanner('Adding income in progress');
+    await apiClient.post('/income', newIncome.value);
+    await fetchData();
     isIncomeModalOpen.value = false;
     newIncome.value = {
       property_id: Number(propertyId.value),
@@ -177,9 +187,9 @@ const addIncome = async () => {
 
 const addExpense = async () => {
   try {
-    const response = await apiClient.post('/expenses', newExpense.value);
-    expenseRecords.value.unshift(response.data);
-    expenseRecords.value.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    showProgressBanner('Adding expense in progress');
+    await apiClient.post('/expenses', newExpense.value);
+    await fetchData();
     isExpenseModalOpen.value = false;
     newExpense.value = {
       property_id: Number(propertyId.value),
@@ -278,11 +288,9 @@ const confirmEditProperty = async () => {
   }
 
   try {
+    showProgressBanner('Updating property in progress');
     await apiClient.patch(`/properties/${currentId}`, payload);
-    property.value = {
-      ...property.value,
-      ...payload
-    };
+    await fetchData();
     closeEditFlyout();
   } catch (err) {
     console.error('Error updating property:', err);
@@ -295,6 +303,13 @@ onMounted(fetchData);
 
 <template>
   <div class="space-y-8">
+    <div
+      v-if="progressBannerMessage"
+      class="fixed top-4 left-1/2 -translate-x-1/2 z-[160] bg-indigo-600 text-white px-6 py-3 rounded-xl shadow-xl text-base font-bold"
+    >
+      {{ progressBannerMessage }}
+    </div>
+
     <!-- Back Button & Header -->
     <div class="flex flex-col space-y-4">
       <button 

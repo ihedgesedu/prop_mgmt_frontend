@@ -2,6 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router';
 import Dashboard from '@/views/Dashboard.vue';
 import Properties from '@/views/Properties.vue';
 import PropertyDetail from '@/views/PropertyDetail.vue';
+import Income from '@/views/Income.vue';
+import Expenses from '@/views/Expenses.vue';
 
 const routes = [
   {
@@ -19,6 +21,16 @@ const routes = [
     name: 'PropertyDetail',
     component: PropertyDetail,
     props: true,
+  },
+  {
+    path: '/income',
+    name: 'Income',
+    component: Income,
+  },
+  {
+    path: '/expenses',
+    name: 'Expenses',
+    component: Expenses,
   },
 ];
 

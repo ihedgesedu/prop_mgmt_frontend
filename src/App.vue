@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router';
-import { LayoutDashboard, Building2, Settings, Menu, X } from 'lucide-vue-next';
+import { LayoutDashboard, Building2, TrendingUp, TrendingDown, Menu, X } from 'lucide-vue-next';
 import { ref } from 'vue';
 
 const isSidebarOpen = ref(true);
@@ -46,6 +46,26 @@ const toggleSidebar = () => {
           >
             <Building2 class="w-5 h-5 shrink-0" />
             <span v-if="isSidebarOpen" class="ml-3">Properties</span>
+          </RouterLink>
+
+          <RouterLink 
+            to="/income" 
+            class="flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors group"
+            active-class="bg-indigo-50 text-indigo-700"
+            :class="[isSidebarOpen ? 'justify-start' : 'justify-center']"
+          >
+            <TrendingUp class="w-5 h-5 shrink-0" />
+            <span v-if="isSidebarOpen" class="ml-3">Income</span>
+          </RouterLink>
+
+          <RouterLink 
+            to="/expenses" 
+            class="flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors group"
+            active-class="bg-indigo-50 text-indigo-700"
+            :class="[isSidebarOpen ? 'justify-start' : 'justify-center']"
+          >
+            <TrendingDown class="w-5 h-5 shrink-0" />
+            <span v-if="isSidebarOpen" class="ml-3">Expenses</span>
           </RouterLink>
         </nav>
 
