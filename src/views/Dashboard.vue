@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import apiClient from '@/api/client';
 import { TrendingUp, TrendingDown, Building, DollarSign, Loader2 } from 'lucide-vue-next';
 import { formatCurrency, formatNumber } from '@/utils/formatters';
@@ -7,6 +7,12 @@ import { formatCurrency, formatNumber } from '@/utils/formatters';
 const summary = ref<any>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
+
+const toNumber = (value: unknown): number => {
+  if (value === undefined || value === null || value === '') return 0;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
 
 const fetchSummary = async () => {
   try {
@@ -26,12 +32,19 @@ const fetchSummary = async () => {
       data = data.data;
     }
     
-    // Handle multiple possible key formats from API
+    const rawIncome =
+      data.total_income ?? data.income ?? data.total_revenue ?? data.totalIncome ?? data.revenue ?? data.total_amount ?? data.totalIncomeAmount ?? 0;
+    const rawExpenses =
+      data.total_expenses ?? data.expenses ?? data.total_costs ?? data.totalExpenses ?? data.costs ?? data.total_spent ?? data.totalExpenseAmount ?? 0;
+    const rawProperties =
+      data.total_properties ?? data.property_count ?? data.properties_count ?? data.total_units ?? data.totalProperties ?? data.properties ?? data.count ?? data.total ?? 0;
+
+    // Handle multiple possible key formats from API — always coerce to numbers so + never string-concatenates
     summary.value = {
-      total_properties: data.total_properties ?? data.property_count ?? data.properties_count ?? data.total_units ?? data.totalProperties ?? data.properties ?? data.count ?? data.total ?? 0,
-      total_income: data.total_income ?? data.income ?? data.total_revenue ?? data.totalIncome ?? data.revenue ?? data.total_amount ?? data.totalIncomeAmount ?? 0,
-      total_expenses: data.total_expenses ?? data.expenses ?? data.total_costs ?? data.totalExpenses ?? data.costs ?? data.total_spent ?? data.totalExpenseAmount ?? 0,
-      ...data
+      ...data,
+      total_properties: toNumber(rawProperties),
+      total_income: toNumber(rawIncome),
+      total_expenses: toNumber(rawExpenses)
     };
   } catch (err) {
     console.error('Error fetching summary:', err);
@@ -40,6 +53,34 @@ const fetchSummary = async () => {
     loading.value = false;
   }
 };
+
+const totalIncome = computed(() => toNumber(summary.value?.total_income));
+const totalExpenses = computed(() => toNumber(summary.value?.total_expenses));
+const chartTotal = computed(() => totalIncome.value + totalExpenses.value);
+
+/** Bar heights for Income vs Expenses (0–100). Avoids NaN when total is 0 or API sent strings. */
+const incomeBarHeightPct = computed(() => {
+  const t = chartTotal.value;
+  if (t <= 0) return 0;
+  return (totalIncome.value / t) * 100;
+});
+
+const expenseBarHeightPct = computed(() => {
+  const t = chartTotal.value;
+  if (t <= 0) return 0;
+  return (totalExpenses.value / t) * 100;
+});
+
+/** Margin for donut: (income - expenses) / income, only when income > 0 */
+const marginRatio = computed(() => {
+  const inc = totalIncome.value;
+  if (inc <= 0) return 0;
+  return (inc - totalExpenses.value) / inc;
+});
+
+const marginPercent = computed(() => Math.round(Math.max(-100, Math.min(100, marginRatio.value * 100))));
+
+const netProfit = computed(() => totalIncome.value - totalExpenses.value);
 
 onMounted(fetchSummary);
 </script>
@@ -87,7 +128,7 @@ onMounted(fetchSummary);
           <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">Total Income</span>
         </div>
         <div class="flex flex-col">
-          <span class="text-2xl font-bold text-gray-900">${{ formatCurrency(summary.total_income) }}</span>
+          <span class="text-2xl font-bold text-gray-900">${{ formatCurrency(totalIncome) }}</span>
           <span class="text-sm text-emerald-600 font-medium">All time</span>
         </div>
       </div>
@@ -101,7 +142,7 @@ onMounted(fetchSummary);
           <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">Total Expenses</span>
         </div>
         <div class="flex flex-col">
-          <span class="text-2xl font-bold text-gray-900">${{ formatCurrency(summary.total_expenses) }}</span>
+          <span class="text-2xl font-bold text-gray-900">${{ formatCurrency(totalExpenses) }}</span>
           <span class="text-sm text-rose-600 font-medium">All time</span>
         </div>
       </div>
@@ -115,7 +156,7 @@ onMounted(fetchSummary);
           <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">Net Profit</span>
         </div>
         <div class="flex flex-col">
-          <span class="text-2xl font-bold text-gray-900">${{ formatCurrency(summary.total_income - summary.total_expenses) }}</span>
+          <span class="text-2xl font-bold text-gray-900">${{ formatCurrency(netProfit) }}</span>
           <span class="text-sm text-gray-500">Portfolio balance</span>
         </div>
       </div>
@@ -125,21 +166,28 @@ onMounted(fetchSummary);
     <div v-if="!loading && !error" class="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <div class="lg:col-span-2 bg-white p-8 rounded-xl border border-gray-200 shadow-sm">
         <h3 class="text-xl font-bold text-gray-900 mb-6">Income vs Expenses</h3>
-        <div class="h-64 flex items-end space-x-8">
-          <div class="flex-1 flex flex-col items-center space-y-4">
-            <div 
-              class="w-full bg-emerald-500 rounded-t-lg transition-all duration-500" 
-              :style="{ height: (summary.total_income / (summary.total_income + summary.total_expenses) * 100) + '%' }"
-            ></div>
-            <span class="text-sm font-medium text-gray-600">Income</span>
+        <div v-if="chartTotal > 0" class="h-64 flex gap-8">
+          <div class="flex-1 flex flex-col h-full min-h-0">
+            <div class="flex-1 flex items-end min-h-0 w-full">
+              <div
+                class="w-full bg-emerald-500 rounded-t-lg transition-all duration-500 min-h-[4px]"
+                :style="{ height: incomeBarHeightPct + '%' }"
+              />
+            </div>
+            <span class="text-sm font-medium text-gray-600 text-center pt-3 shrink-0">Income</span>
           </div>
-          <div class="flex-1 flex flex-col items-center space-y-4">
-            <div 
-              class="w-full bg-rose-500 rounded-t-lg transition-all duration-500" 
-              :style="{ height: (summary.total_expenses / (summary.total_income + summary.total_expenses) * 100) + '%' }"
-            ></div>
-            <span class="text-sm font-medium text-gray-600">Expenses</span>
+          <div class="flex-1 flex flex-col h-full min-h-0">
+            <div class="flex-1 flex items-end min-h-0 w-full">
+              <div
+                class="w-full bg-rose-500 rounded-t-lg transition-all duration-500 min-h-[4px]"
+                :style="{ height: expenseBarHeightPct + '%' }"
+              />
+            </div>
+            <span class="text-sm font-medium text-gray-600 text-center pt-3 shrink-0">Expenses</span>
           </div>
+        </div>
+        <div v-else class="h-64 flex items-center justify-center rounded-lg bg-gray-50 border border-dashed border-gray-200 text-sm text-gray-500">
+          Add income and expense records to see this comparison chart.
         </div>
       </div>
 
@@ -164,13 +212,13 @@ onMounted(fetchSummary);
                 stroke="#4f46e5"
                 stroke-width="12"
                 stroke-dasharray="440"
-                :stroke-dashoffset="440 - (440 * (summary.total_income > 0 ? (summary.total_income - summary.total_expenses) / summary.total_income : 0))"
+                :stroke-dashoffset="440 - (440 * Math.max(0, Math.min(1, totalIncome > 0 ? marginRatio : 0)))"
                 stroke-linecap="round"
               />
             </svg>
             <div class="absolute inset-0 flex flex-col items-center justify-center">
               <span class="text-3xl font-bold text-gray-900">
-                {{ Math.round((summary.total_income > 0 ? (summary.total_income - summary.total_expenses) / summary.total_income : 0) * 100) }}%
+                {{ marginPercent }}%
               </span>
               <span class="text-xs text-gray-500 uppercase">Margin</span>
             </div>
